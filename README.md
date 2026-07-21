@@ -140,6 +140,28 @@ systemctl --user daemon-reload
 systemctl --user enable --now claudio
 ```
 
+## Support ☕
+
+If Claudio saves you keystrokes, you can buy me a coffee — even 1–5 USD is
+appreciated:
+
+- **BTC**
+  ```
+  bc1qw9z92xawkqcdu2vztqf0ken3a3ke4ewvrxrnl2
+  ```
+- **ETH**
+  ```
+  0xEc2ffc781F49E3e8C75714EBCff05bF76928c8FD
+  ```
+- **USDT** (TRON / TRC-20)
+  ```
+  THLAyVrmZtfCAYeoyQVJ4baNJJvK1HkFgi
+  ```
+- **Monero (XMR)**
+  ```
+  41z7HCz7EzUNHEy5KFADyXSP9K6phucg1bsd8h5HXgQrfT6mZzJkUJQMqvEtKAx16FBMu5DDxRJfW4jU4icUHmUbHs77wz4
+  ```
+
 ## License
 
 MIT
