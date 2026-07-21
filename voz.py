@@ -13,6 +13,9 @@ Usage:
   voz.py --status        show whether the hook is active and which voice is set
 
 Configuration (~/.local/share/claudio/config or environment):
+  CLAUDIO_TTS               engine: kokoro | piper | auto (default: auto —
+                            kokoro if its model is installed, else piper)
+  CLAUDIO_KOKORO_VOICE      Kokoro voice, e.g. ef_dora (default: per language)
   CLAUDIO_VOICE             Piper voice name, e.g. es_MX-claude-high
   CLAUDIO_VOICE_MAX_CHARS   cap on spoken text length (default: 500)
 
@@ -31,8 +34,23 @@ from pathlib import Path
 DATA_DIR = Path.home() / ".local/share/claudio"
 CONFIG_FILE = DATA_DIR / "config"
 VOICES_DIR = DATA_DIR / "voices"
+KOKORO_DIR = DATA_DIR / "kokoro"
+KOKORO_ONNX = KOKORO_DIR / "kokoro-v1.0.onnx"
+KOKORO_VOICES_BIN = KOKORO_DIR / "voices-v1.0.bin"
 SPEAK_FLAG = DATA_DIR / "speaking"
 SETTINGS = Path.home() / ".claude/settings.json"
+
+# Kokoro language + default voice per Claudio language (no de/ca/nl/ru yet)
+KOKORO_LANGS = {
+    "en": ("en-us", "af_heart"),
+    "es": ("es", "ef_dora"),
+    "fr": ("fr-fr", "ff_siwis"),
+    "it": ("it", "if_sara"),
+    "pt": ("pt-br", "pf_dora"),
+    "hi": ("hi", "hf_alpha"),
+    "ja": ("ja", "jf_alpha"),
+    "zh": ("cmn", "zf_xiaobei"),
+}
 
 
 def _load_config():
@@ -52,6 +70,10 @@ _load_config()
 LANG = os.environ.get("CLAUDIO_LANG", "es").lower()
 VOICE = os.environ.get("CLAUDIO_VOICE", "")
 MAX_CHARS = int(os.environ.get("CLAUDIO_VOICE_MAX_CHARS", "500"))
+TTS = os.environ.get("CLAUDIO_TTS", "auto").lower()
+KOKORO_VOICE = os.environ.get(
+    "CLAUDIO_KOKORO_VOICE", KOKORO_LANGS.get(LANG, ("", ""))[1]
+)
 
 MESSAGES = {
     "en": {
@@ -118,8 +140,28 @@ def last_reply(transcript_path):
     return text
 
 
-def voice_onnx():
-    return VOICES_DIR / f"{VOICE}.onnx" if VOICE else None
+def kokoro_available():
+    return (
+        KOKORO_ONNX.exists()
+        and KOKORO_VOICES_BIN.exists()
+        and LANG in KOKORO_LANGS
+        and bool(KOKORO_VOICE)
+    )
+
+
+def piper_available():
+    return bool(VOICE) and (VOICES_DIR / f"{VOICE}.onnx").exists()
+
+
+def engine():
+    """Resolve CLAUDIO_TTS to a usable engine name, or "" if none."""
+    order = {"kokoro": ["kokoro", "piper"], "piper": ["piper", "kokoro"]}
+    for eng in order.get(TTS, ["kokoro", "piper"]):  # auto prefers kokoro
+        if eng == "kokoro" and kokoro_available():
+            return "kokoro"
+        if eng == "piper" and piper_available():
+            return "piper"
+    return ""
 
 
 def speak_detached(text):
@@ -133,15 +175,93 @@ def speak_detached(text):
     )
 
 
-def speak(text):
-    onnx = voice_onnx()
-    if not onnx or not onnx.exists():
-        return
+def raw_player(rate):
+    return subprocess.Popen(
+        ["aplay", "-q", "-r", str(rate), "-f", "S16_LE", "-t", "raw", "-c", "1"],
+        stdin=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def split_sentences(text):
+    """Sentence-ish chunks (min ~60 chars) so Kokoro can synthesize the next
+    one while the previous is still playing — first audio in ~1-2 s."""
+    parts = re.split(r"(?<=[.!?…;:])\s+", text)
+    chunks, cur = [], ""
+    for p in parts:
+        cur = f"{cur} {p}".strip()
+        if len(cur) >= 60:
+            chunks.append(cur)
+            cur = ""
+    if cur:
+        chunks.append(cur)
+    return chunks or [text]
+
+
+def speak_kokoro(text):
+    import queue
+    import threading
+
+    import numpy as np
+    from kokoro_onnx import Kokoro
+
+    lang = KOKORO_LANGS[LANG][0]
+    kokoro = Kokoro(str(KOKORO_ONNX), str(KOKORO_VOICES_BIN))
+    aplay = raw_player(24000)
+    q = queue.Queue(maxsize=2)
+
+    def feeder():  # aplay's stdin blocks while playing; feed it off-thread
+        while True:
+            pcm = q.get()
+            if pcm is None:
+                break
+            try:
+                aplay.stdin.write(pcm)
+            except (BrokenPipeError, OSError):
+                break
+        try:
+            aplay.stdin.close()
+        except OSError:
+            pass
+
+    thread = threading.Thread(target=feeder)
+    thread.start()
+    try:
+        for chunk in split_sentences(text):
+            samples, _rate = kokoro.create(chunk, voice=KOKORO_VOICE, lang=lang)
+            q.put((np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes())
+            SPEAK_FLAG.touch()  # keep the mute flag fresh on long replies
+    finally:
+        q.put(None)
+        thread.join()
+        aplay.wait()
+
+
+def speak_piper(text):
+    onnx = VOICES_DIR / f"{VOICE}.onnx"
     rate = 22050
     try:
         rate = json.loads(Path(f"{onnx}.json").read_text())["audio"]["sample_rate"]
     except (OSError, ValueError, KeyError):
         pass
+    piper = subprocess.Popen(
+        [sys.executable, "-m", "piper", "-m", VOICE,
+         "--data-dir", str(VOICES_DIR), "--output-raw", "--", text],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["aplay", "-q", "-r", str(rate), "-f", "S16_LE", "-t", "raw", "-c", "1"],
+        stdin=piper.stdout,
+        stderr=subprocess.DEVNULL,
+    )
+    piper.wait()
+
+
+def speak(text):
+    eng = engine()
+    if not eng:
+        return
     # latest reply wins: silence whatever is still being spoken
     try:
         os.killpg(int(SPEAK_FLAG.read_text()), signal.SIGTERM)
@@ -149,18 +269,14 @@ def speak(text):
         pass
     SPEAK_FLAG.write_text(str(os.getpid()))
     try:
-        piper = subprocess.Popen(
-            [sys.executable, "-m", "piper", "-m", VOICE,
-             "--data-dir", str(VOICES_DIR), "--output-raw", "--", text],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        subprocess.run(
-            ["aplay", "-q", "-r", str(rate), "-f", "S16_LE", "-t", "raw", "-c", "1"],
-            stdin=piper.stdout,
-            stderr=subprocess.DEVNULL,
-        )
-        piper.wait()
+        if eng == "kokoro":
+            try:
+                speak_kokoro(text)
+            except Exception:
+                if piper_available():
+                    speak_piper(text)
+        else:
+            speak_piper(text)
     finally:
         time.sleep(0.4)  # let the room echo die out before unmuting the mic
         try:
@@ -198,7 +314,7 @@ def hook_enabled():
 
 
 def enable():
-    if not (voice_onnx() and voice_onnx().exists()):
+    if not engine():
         print(t("no_voice"))
         sys.exit(1)
     data = _read_settings()
@@ -224,7 +340,11 @@ def disable():
 
 
 def status():
-    voice = VOICE or "—"
+    eng = engine()
+    voice = {
+        "kokoro": f"kokoro/{KOKORO_VOICE}",
+        "piper": f"piper/{VOICE}",
+    }.get(eng, "—")
     print(t("status_on" if hook_enabled() else "status_off", voice=voice))
 
 

@@ -4,7 +4,7 @@
 #   bash setup.sh                    # interactive (suggests your system language)
 #   bash setup.sh en                 # pick a language directly
 #   bash setup.sh en jarvis          # language + custom wake word
-#   bash setup.sh en jarvis novoice  # skip the Piper voice (Claude won't speak)
+#   bash setup.sh en jarvis kokoro   # voice engine: kokoro | piper | novoice
 set -eu
 
 DATA="$HOME/.local/share/claudio"
@@ -32,8 +32,13 @@ declare -A WAKES=(
     [en]=claude  [fr]=claude  [de]=claude  [nl]=claude
     [ru]=клод    [hi]=क्लॉड    [zh]=克劳德   [ja]=クロード
 )
-# Piper TTS voices so Claude can speak its replies (~60 MB each).
-# hi/ja have no Piper voice yet — those languages listen but don't speak.
+# TTS so Claude can speak its replies. Two engines:
+# - kokoro: most natural, one ~340 MB model for its 8 languages
+# - piper:  lightweight (~60 MB per language), flatter voice
+declare -A KOKORO_VOICES=(
+    [es]=ef_dora [en]=af_heart [pt]=pf_dora  [fr]=ff_siwis
+    [it]=if_sara [hi]=hf_alpha [ja]=jf_alpha [zh]=zf_xiaobei
+)
 declare -A VOICES=(
     [es]=es_MX-claude-high
     [en]=en_US-lessac-medium
@@ -46,6 +51,7 @@ declare -A VOICES=(
     [ru]=ru_RU-irina-medium
     [zh]=zh_CN-huayan-medium
 )
+KOKORO_URL=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
 
 # --- language selection: detect from system locale, allow override ----------
 sys_lang="${LANG%%[._]*}"; sys_lang="${sys_lang%%_*}"
@@ -94,34 +100,69 @@ if [ ! -d "$model_dir" ]; then
     fi
 fi
 
-# --- voice (optional): Piper TTS so Claude can speak its replies ------------
-voice="${VOICES[$lang]:-}"
-if [ -n "$voice" ]; then
-    want="${3:-}"
-    if [ -z "$want" ] && [ -t 0 ]; then
-        read -r -p "Install a voice so Claude speaks its replies? (~60 MB) [Y/n]: " want
+# --- voice (optional): TTS so Claude can speak its replies ------------------
+kokoro_voice="${KOKORO_VOICES[$lang]:-}"
+piper_voice="${VOICES[$lang]:-}"
+engine="${3:-}"
+if [ -z "$engine" ] && { [ -n "$kokoro_voice" ] || [ -n "$piper_voice" ]; }; then
+    if [ -t 0 ]; then
+        echo "Claude can speak its replies out loud. Voice engines:"
+        [ -n "$kokoro_voice" ] && echo "  kokoro  - most natural voice (~340 MB download)"
+        [ -n "$piper_voice" ]  && echo "  piper   - lightweight (~60 MB), flatter voice"
+        echo "  novoice - skip, text only"
+        default_engine=$([ -n "$kokoro_voice" ] && echo kokoro || echo piper)
+        read -r -p "Voice engine [$default_engine]: " engine
+        engine="${engine:-$default_engine}"
+    else
+        engine=$([ -n "$kokoro_voice" ] && echo kokoro || echo piper)
     fi
-    case "${want:-y}" in
-        [nN]*|novoice) voice="" ;;
-        *)
+fi
+case "$engine" in
+    kokoro)
+        if [ -z "$kokoro_voice" ]; then
+            echo "Kokoro has no '$lang' voice yet; falling back to piper." >&2
+            engine=piper
+        else
+            echo "Installing Kokoro TTS…"
+            "$DATA/venv/bin/pip" install --quiet kokoro-onnx
+            mkdir -p "$DATA/kokoro"
+            for f in kokoro-v1.0.onnx voices-v1.0.bin; do
+                if [ ! -f "$DATA/kokoro/$f" ]; then
+                    echo "Downloading $f…"
+                    curl -L --progress-bar -o "$DATA/kokoro/$f" "$KOKORO_URL/$f"
+                fi
+            done
+        fi
+        ;;
+esac
+case "$engine" in
+    piper)
+        if [ -z "$piper_voice" ]; then
+            echo "(No voice available for '$lang' yet — Claudio will listen but not speak.)"
+            engine=""
+        else
             echo "Installing Piper TTS…"
             "$DATA/venv/bin/pip" install --quiet piper-tts
-            if [ ! -f "$DATA/voices/$voice.onnx" ]; then
-                echo "Downloading voice $voice…"
-                "$DATA/venv/bin/python" -m piper.download_voices "$voice" --data-dir "$DATA/voices"
+            if [ ! -f "$DATA/voices/$piper_voice.onnx" ]; then
+                echo "Downloading voice $piper_voice…"
+                "$DATA/venv/bin/python" -m piper.download_voices "$piper_voice" --data-dir "$DATA/voices"
             fi
-            ;;
-    esac
-else
-    echo "(No Piper voice available for '$lang' yet — Claudio will listen but not speak.)"
-fi
+        fi
+        ;;
+    kokoro) ;;
+    *) engine="" ;;
+esac
 
 # --- config -----------------------------------------------------------------
 cat > "$DATA/config" <<EOF
 CLAUDIO_LANG=$lang
 CLAUDIO_WAKE=$wake
 EOF
-[ -n "$voice" ] && echo "CLAUDIO_VOICE=$voice" >> "$DATA/config"
+if [ "$engine" = kokoro ]; then
+    printf 'CLAUDIO_TTS=kokoro\nCLAUDIO_KOKORO_VOICE=%s\n' "$kokoro_voice" >> "$DATA/config"
+elif [ "$engine" = piper ]; then
+    printf 'CLAUDIO_TTS=piper\nCLAUDIO_VOICE=%s\n' "$piper_voice" >> "$DATA/config"
+fi
 
 # --- global `claudio` command -----------------------------------------------
 mkdir -p "$HOME/.local/bin"
@@ -169,6 +210,6 @@ EOF
 
 echo
 echo "Done. Start with:  claudio start   (or: bash claudio.sh start)"
-[ -n "$voice" ] && echo "Give Claude a voice:  claudio voz on   (try it: claudio voz test)"
+[ -n "$engine" ] && echo "Give Claude a voice:  claudio voz on   (try it: claudio voz test)"
 echo "Autostart on login (optional):"
 echo "  cp $DATA/claudio.service ~/.config/systemd/user/ && systemctl --user enable --now claudio"

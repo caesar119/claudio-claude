@@ -9,9 +9,10 @@ into your terminal. And Claude can **speak its replies back** out loud.
 
 Speech recognition runs **100% offline** with [Vosk](https://alphacephei.com/vosk/)
 small models (~40–50 MB, CPU-friendly, no audio ever leaves your machine), and
-speech output with [Piper](https://github.com/OHF-Voice/piper1-gpl) (also
-offline). **12 languages supported**: es, en, pt, fr, de, it, ca, nl, ru, hi,
-zh, ja — all of them listen; all but hi/ja can also speak.
+speech output with [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) or
+[Piper](https://github.com/OHF-Voice/piper1-gpl) (also offline).
+**12 languages supported**: es, en, pt, fr, de, it, ca, nl, ru, hi, zh, ja —
+all of them listen and speak.
 
 ## Requirements
 
@@ -67,8 +68,16 @@ Claudio tries two routes, in order:
 
 ## Give Claude a voice 🔊
 
-If you accepted the voice install in `setup.sh` (it downloads a ~60 MB Piper
-voice), turn it on with:
+`setup.sh` offers two offline TTS engines:
+
+- **kokoro** (default where available) — [Kokoro-82M](https://github.com/thewh1teagle/kokoro-onnx),
+  by far the most natural voice; one ~340 MB model covers en, es, fr, it, pt,
+  hi, ja, zh. Runs faster than real time on a normal CPU.
+- **piper** — lightweight (~60 MB per language), flatter/more robotic voice;
+  covers everything except hi/ja. Used automatically where Kokoro has no voice
+  (de, ca, nl, ru) and as fallback if Kokoro breaks.
+
+Turn it on with:
 
 ```bash
 claudio voz on       # Claude reads every reply out loud
@@ -112,6 +121,8 @@ variables override it.
 | `CLAUDIO_DEVICE` | system default | ALSA capture device (`arecord -l`) |
 | `CLAUDIO_MODEL` | `~/.local/share/claudio/model-<lang>` | Vosk model path |
 | `CLAUDIO_TMUX_TARGET` | autodetect | tmux pane to type into |
+| `CLAUDIO_TTS` | `auto` | Voice engine: `kokoro`, `piper` or `auto` |
+| `CLAUDIO_KOKORO_VOICE` | per-language | Kokoro voice (es: `ef_dora`/`em_alex`/`em_santa`) |
 | `CLAUDIO_VOICE` | per-language | Piper voice name (e.g. `es_MX-claude-high`) |
 | `CLAUDIO_VOICE_MAX_CHARS` | `500` | Cap on spoken reply length |
 

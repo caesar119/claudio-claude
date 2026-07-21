@@ -10,9 +10,10 @@ tu terminal. Y Claude puede **contestarte hablando** en voz alta.
 El reconocimiento de voz corre **100% offline** con modelos chicos de
 [Vosk](https://alphacephei.com/vosk/) (~40–50 MB, livianos para CPU; el audio
 nunca sale de tu máquina), y la voz de salida con
+[Kokoro](https://github.com/thewh1teagle/kokoro-onnx) o
 [Piper](https://github.com/OHF-Voice/piper1-gpl) (también offline).
 **12 idiomas soportados**: es, en, pt, fr, de, it, ca, nl, ru, hi, zh, ja —
-todos escuchan; todos menos hi/ja también hablan.
+todos escuchan y hablan.
 
 ## Requisitos
 
@@ -68,8 +69,16 @@ Claudio prueba dos vías, en orden:
 
 ## Darle voz a Claude 🔊
 
-Si aceptaste instalar la voz en `setup.sh` (baja una voz Piper de ~60 MB),
-activala con:
+`setup.sh` ofrece dos motores TTS offline:
+
+- **kokoro** (default donde está disponible) — [Kokoro-82M](https://github.com/thewh1teagle/kokoro-onnx),
+  lejos la voz más natural; un solo modelo de ~340 MB cubre en, es, fr, it,
+  pt, hi, ja, zh. Corre más rápido que tiempo real en una CPU normal.
+- **piper** — liviano (~60 MB por idioma), voz más plana/robótica; cubre todo
+  menos hi/ja. Se usa automáticamente donde Kokoro no tiene voz (de, ca, nl,
+  ru) y como fallback si Kokoro falla.
+
+Activala con:
 
 ```bash
 claudio voz on       # Claude lee cada respuesta en voz alta
@@ -115,6 +124,8 @@ entorno tienen prioridad.
 | `CLAUDIO_DEVICE` | default del sistema | Dispositivo ALSA (`arecord -l`) |
 | `CLAUDIO_MODEL` | `~/.local/share/claudio/model-<lang>` | Ruta al modelo Vosk |
 | `CLAUDIO_TMUX_TARGET` | autodetecta | Pane de tmux donde tipear |
+| `CLAUDIO_TTS` | `auto` | Motor de voz: `kokoro`, `piper` o `auto` |
+| `CLAUDIO_KOKORO_VOICE` | según idioma | Voz Kokoro (es: `ef_dora`/`em_alex`/`em_santa`) |
 | `CLAUDIO_VOICE` | según idioma | Voz Piper (ej. `es_MX-claude-high`) |
 | `CLAUDIO_VOICE_MAX_CHARS` | `500` | Tope de largo de la respuesta hablada |
 
