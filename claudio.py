@@ -71,6 +71,7 @@ CHUNK = 4000  # bytes of S16LE mono audio -> 0.125 s
 
 LOG_FILE = DATA_DIR / "claudio.log"
 BEEP_WAV = DATA_DIR / "beep.wav"
+SPEAK_FLAG = DATA_DIR / "speaking"  # written by voz.py while Claude talks
 
 MESSAGES = {
     "en": {
@@ -316,6 +317,17 @@ def main():
             time.sleep(2)
             state["arecord"] = start_arecord()
             continue
+
+        try:
+            # Claude is speaking (voz.py): mute so it doesn't hear itself.
+            # A stale flag (crashed speaker) is discarded after 3 minutes.
+            if time.time() - SPEAK_FLAG.stat().st_mtime < 180:
+                rec.Reset()
+                beeped = False
+                continue
+            SPEAK_FLAG.unlink(missing_ok=True)
+        except OSError:
+            pass  # no flag — nobody is speaking
 
         if rec.AcceptWaveform(data):
             text = json.loads(rec.Result()).get("text", "").strip()

@@ -5,12 +5,14 @@
 Claudio deja el micrófono escuchando en segundo plano. Cuando decís la palabra
 de activación (**"claudio"** por defecto), transcribe la orden que sigue y se
 la manda a [Claude Code](https://claude.com/claude-code) — tipeada directo en
-tu terminal.
+tu terminal. Y Claude puede **contestarte hablando** en voz alta.
 
 El reconocimiento de voz corre **100% offline** con modelos chicos de
 [Vosk](https://alphacephei.com/vosk/) (~40–50 MB, livianos para CPU; el audio
-nunca sale de tu máquina). **12 idiomas soportados**: es, en, pt, fr, de, it,
-ca, nl, ru, hi, zh, ja.
+nunca sale de tu máquina), y la voz de salida con
+[Piper](https://github.com/OHF-Voice/piper1-gpl) (también offline).
+**12 idiomas soportados**: es, en, pt, fr, de, it, ca, nl, ru, hi, zh, ja —
+todos escuchan; todos menos hi/ja también hablan.
 
 ## Requisitos
 
@@ -64,6 +66,33 @@ Claudio prueba dos vías, en orden:
    ⚠️ En headless Claude no puede pedir permisos interactivos; para dejarlo
    editar sin preguntar: `export CLAUDIO_CLAUDE_ARGS="--permission-mode acceptEdits"`.
 
+## Darle voz a Claude 🔊
+
+Si aceptaste instalar la voz en `setup.sh` (baja una voz Piper de ~60 MB),
+activala con:
+
+```bash
+claudio voz on       # Claude lee cada respuesta en voz alta
+claudio voz test     # escuchá la voz sin involucrar a Claude
+claudio voz off      # de vuelta al silencio
+```
+
+`voz on` registra un [hook Stop](https://docs.anthropic.com/en/docs/claude-code/hooks)
+en `~/.claude/settings.json`: cada vez que Claude Code termina una respuesta —
+en cualquier proyecto, disparada por voz o tipeada — la lee con Piper.
+Reiniciá tu sesión de Claude Code (o corré `/hooks`) después de activarla o
+desactivarla para que lo tome.
+
+Detalles que conviene saber:
+
+- Antes de hablar se eliminan bloques de código, tablas y markdown, y el texto
+  se corta en `CLAUDIO_VOICE_MAX_CHARS` (500) para que las respuestas largas
+  no se vuelvan un monólogo.
+- Mientras Claude habla, Claudio **silencia el mic** (archivo flag `speaking`)
+  para no despertarse escuchando su propia voz.
+- Una respuesta nueva interrumpe a la anterior — gana la última.
+- La síntesis es local; no se manda nada a ningún lado.
+
 ### Varios proyectos
 
 `claudio code ~/algún/proyecto` abre cada proyecto en su propia sesión tmux
@@ -86,6 +115,8 @@ entorno tienen prioridad.
 | `CLAUDIO_DEVICE` | default del sistema | Dispositivo ALSA (`arecord -l`) |
 | `CLAUDIO_MODEL` | `~/.local/share/claudio/model-<lang>` | Ruta al modelo Vosk |
 | `CLAUDIO_TMUX_TARGET` | autodetecta | Pane de tmux donde tipear |
+| `CLAUDIO_VOICE` | según idioma | Voz Piper (ej. `es_MX-claude-high`) |
+| `CLAUDIO_VOICE_MAX_CHARS` | `500` | Tope de largo de la respuesta hablada |
 
 Tip: si el modelo chico no engancha bien tu palabra de activación, elegí una
 palabra común de tu idioma, o bajá un modelo Vosk grande y apuntá

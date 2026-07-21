@@ -5,11 +5,13 @@
 Claudio keeps your microphone listening in the background. When you say the
 wake word (**"claudio"** by default), it transcribes the command that follows
 and sends it to [Claude Code](https://claude.com/claude-code) — typed straight
-into your terminal.
+into your terminal. And Claude can **speak its replies back** out loud.
 
 Speech recognition runs **100% offline** with [Vosk](https://alphacephei.com/vosk/)
-small models (~40–50 MB, CPU-friendly, no audio ever leaves your machine).
-**12 languages supported**: es, en, pt, fr, de, it, ca, nl, ru, hi, zh, ja.
+small models (~40–50 MB, CPU-friendly, no audio ever leaves your machine), and
+speech output with [Piper](https://github.com/OHF-Voice/piper1-gpl) (also
+offline). **12 languages supported**: es, en, pt, fr, de, it, ca, nl, ru, hi,
+zh, ja — all of them listen; all but hi/ja can also speak.
 
 ## Requirements
 
@@ -63,6 +65,31 @@ Claudio tries two routes, in order:
    ⚠️ Headless Claude can't ask for interactive permissions; to let it edit
    files unattended: `export CLAUDIO_CLAUDE_ARGS="--permission-mode acceptEdits"`.
 
+## Give Claude a voice 🔊
+
+If you accepted the voice install in `setup.sh` (it downloads a ~60 MB Piper
+voice), turn it on with:
+
+```bash
+claudio voz on       # Claude reads every reply out loud
+claudio voz test     # hear the voice without involving Claude
+claudio voz off      # back to silence
+```
+
+`voz on` registers a [Stop hook](https://docs.anthropic.com/en/docs/claude-code/hooks)
+in `~/.claude/settings.json`: whenever Claude Code finishes a reply — in any
+project, voice-triggered or typed — the reply is spoken with Piper. Restart
+your Claude Code session (or run `/hooks`) after toggling so it takes effect.
+
+Details worth knowing:
+
+- Code blocks, tables and markdown are stripped before speaking, and the text
+  is capped at `CLAUDIO_VOICE_MAX_CHARS` (500) so long answers don't monologue.
+- While Claude talks, Claudio **mutes the mic** (flag file `speaking`) so it
+  doesn't wake itself up hearing its own voice.
+- A new reply interrupts the previous one — the latest answer wins.
+- Speech is synthesized locally; nothing is sent anywhere.
+
 ### Multiple projects
 
 `claudio code ~/some/project` opens each project in its own tmux session
@@ -85,6 +112,8 @@ variables override it.
 | `CLAUDIO_DEVICE` | system default | ALSA capture device (`arecord -l`) |
 | `CLAUDIO_MODEL` | `~/.local/share/claudio/model-<lang>` | Vosk model path |
 | `CLAUDIO_TMUX_TARGET` | autodetect | tmux pane to type into |
+| `CLAUDIO_VOICE` | per-language | Piper voice name (e.g. `es_MX-claude-high`) |
+| `CLAUDIO_VOICE_MAX_CHARS` | `500` | Cap on spoken reply length |
 
 Tip: if the small model struggles with your wake word, pick a common word of
 your language, or download a full-size Vosk model and point `CLAUDIO_MODEL`

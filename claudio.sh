@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claudio — control del daemon de voz.
-# Uso: ./claudio.sh {start|stop|status|log|fg}
+# Uso: ./claudio.sh {start|stop|status|log|fg|tmux|voz}
 set -u
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,8 +50,19 @@ case "${1:-}" in
         # El daemon detecta este pane y tipea las órdenes de voz acá.
         exec tmux new-session -A -s claudio -c "$DIR" claude
         ;;
+    voz|voice)
+        # Claude habla sus respuestas en voz alta (hook Stop + Piper TTS).
+        sub="${2:-status}"
+        case "$sub" in
+            on)     exec "$PY" "$DIR/voz.py" --enable ;;
+            off)    exec "$PY" "$DIR/voz.py" --disable ;;
+            status) exec "$PY" "$DIR/voz.py" --status ;;
+            test)   shift 2; exec "$PY" "$DIR/voz.py" --say "$@" ;;
+            *)      echo "Uso: $0 voz {on|off|status|test [texto]}"; exit 1 ;;
+        esac
+        ;;
     *)
-        echo "Uso: $0 {start|stop|status|log|fg|tmux}"
+        echo "Uso: $0 {start|stop|status|log|fg|tmux|voz}"
         exit 1
         ;;
 esac
