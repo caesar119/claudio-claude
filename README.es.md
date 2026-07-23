@@ -49,6 +49,9 @@ Y después decís:
 
 > **"Claudio, corré los tests"**
 
+¿Querés un asistente por proyecto, cada uno con su nombre y su voz? Mirá
+[Un equipo de trabajadores](#un-equipo-de-trabajadores-).
+
 - Un *beep* corto confirma que escuchó la palabra de activación.
 - Si decís la palabra sola, hace beep y espera tu orden hasta 10 segundos.
 - `claudio log` muestra lo que escucha; `claudio stop` lo apaga.
@@ -102,12 +105,42 @@ Detalles que conviene saber:
 - Una respuesta nueva interrumpe a la anterior — gana la última.
 - La síntesis es local; no se manda nada a ningún lado.
 
-### Varios proyectos
+## Un equipo de trabajadores 👥
 
-`claudio code ~/algún/proyecto` abre cada proyecto en su propia sesión tmux
-(`claudio-<nombre>`). Con varios abiertos a la vez, las órdenes de voz van al
-pane **que estás mirando** (sesión atacada, pane activo); si ninguno está a la
-vista, a la primera sesión `claudio-*` que encuentre.
+Contratá un **trabajador con nombre para cada proyecto** — como empleados a
+los que llamás por su nombre:
+
+```bash
+claudio hire marcela ~/proyectos/backend ef_dora   # nombre, proyecto, voz
+claudio hire bruno ~/proyectos/webapp em_santa
+claudio team          # quién trabaja dónde (y quién está presente en tmux)
+claudio fire bruno    # sacar un trabajador
+```
+
+Y después les hablás directamente:
+
+> **"Marcela, corré los tests"** — se tipea en la terminal de Marcela (la
+> abrís con `claudio code marcela`), o corre headless **en su proyecto** si
+> está cerrada. **"Claudio, commiteá todo"** — va al proyecto de Claudio.
+> El mismo mic, distintos trabajadores, al mismo tiempo.
+
+- Cada trabajador es dueño de un proyecto y de una sesión tmux
+  (`claudio-<nombre>`).
+- Cada uno **contesta con su propia voz** (elegí cualquier voz Kokoro).
+- El daemon recarga el equipo al vuelo — no hay que reiniciar tras
+  hire/fire.
+- El primer `hire` conserva automáticamente tu palabra de activación
+  original como trabajador, así no se rompe nada.
+- El equipo vive en `~/.local/share/claudio/team` (una línea
+  `nombre  dir  voz` por trabajador). Elegí nombres que el modelo de voz
+  reconozca bien — los nombres de pila comunes de tu idioma andan mejor.
+
+### Sin equipo (una sola palabra de activación)
+
+Si nunca contratás a nadie, vale el comportamiento v1: `claudio code
+~/algún/proyecto` abre cada proyecto en su propia sesión tmux y las órdenes
+de voz van al pane **que estás mirando** (sesión atacada, pane activo); si
+ninguno está a la vista, a la primera sesión `claudio-*` que encuentre.
 
 ## Configuración
 

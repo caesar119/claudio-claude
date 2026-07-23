@@ -72,6 +72,7 @@ CHUNK = 4000  # bytes of S16LE mono audio -> 0.125 s
 LOG_FILE = DATA_DIR / "claudio.log"
 BEEP_WAV = DATA_DIR / "beep.wav"
 SPEAK_FLAG = DATA_DIR / "speaking"  # written by voz.py while Claude talks
+TEAM_FILE = DATA_DIR / "team"      # one worker per line: name<TAB>dir<TAB>voice
 
 MESSAGES = {
     "en": {
@@ -163,15 +164,36 @@ def normalize(text):
     return "".join(c for c in nfd if not unicodedata.combining(c))
 
 
-def command_after_wake(text):
-    """If the text contains the wake word, return what follows it."""
+def load_team():
+    """Workers hired with `claudio hire`. Without a team file, a single
+    legacy worker keeps the v1 behavior (CLAUDIO_WAKE + visible-pane routing)."""
+    workers = []
+    try:
+        for line in TEAM_FILE.read_text().splitlines():
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 2 and parts[0].strip():
+                workers.append({
+                    "name": parts[0].strip(),
+                    "dir": parts[1].strip(),
+                    "voice": parts[2].strip() if len(parts) > 2 else "",
+                })
+    except OSError:
+        pass
+    if not workers:
+        workers = [{"name": WAKE, "dir": WORKDIR, "voice": "", "legacy": True}]
+    return workers
+
+
+def match_worker(text, workers):
+    """If the text contains a worker's name, return (worker, what follows)."""
     words = text.split()
     norm = [normalize(w) for w in words]
-    wake = normalize(WAKE)
-    if wake not in norm:
-        return None
-    idx = norm.index(wake)
-    return " ".join(words[idx + 1:])
+    for worker in workers:
+        wake = normalize(worker["name"])
+        if wake in norm:
+            idx = norm.index(wake)
+            return worker, " ".join(words[idx + 1:])
+    return None, None
 
 
 def start_arecord():
@@ -223,6 +245,27 @@ def find_tmux_target():
     return best
 
 
+def find_worker_pane(name):
+    """Active pane of the worker's own tmux session (claudio-<name>), or None."""
+    if not shutil.which("tmux"):
+        return None
+    try:
+        r = subprocess.run(
+            ["tmux", "list-panes", "-s", "-t", f"=claudio-{name}", "-F",
+             "#{pane_id}\t#{window_active}\t#{pane_active}"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    for line in r.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[1] == "1" and parts[2] == "1":
+            return parts[0]
+    return None
+
+
 def send_tmux(target, text):
     """Type the command into the tmux pane, as if you wrote it yourself."""
     r = subprocess.run(
@@ -239,14 +282,14 @@ def send_tmux(target, text):
     return r.returncode == 0
 
 
-def run_claude(text):
-    """Headless mode: try to continue the latest conversation in WORKDIR;
+def run_claude(text, workdir):
+    """Headless mode: try to continue the latest conversation in workdir;
     if there is none, start a new one."""
     base = [CLAUDE_BIN, *EXTRA_ARGS, "-p", text]
     for args in ([CLAUDE_BIN, "--continue", *EXTRA_ARGS, "-p", text], base):
         try:
             r = subprocess.run(
-                args, cwd=WORKDIR, capture_output=True, text=True, timeout=600
+                args, cwd=workdir, capture_output=True, text=True, timeout=600
             )
         except subprocess.TimeoutExpired:
             return t("claude_timeout")
@@ -258,24 +301,28 @@ def run_claude(text):
     return t("claude_error", err="?")
 
 
-def dispatch(text, state):
-    log(t("order", text=text))
+def dispatch(worker, text, state):
+    title = worker["name"].capitalize()
+    log(f"[{worker['name']}] " + t("order", text=text))
     # 1) claude running interactively in tmux → type the command there
-    target = find_tmux_target()
+    if worker.get("legacy"):
+        target = find_tmux_target()
+    else:
+        target = find_worker_pane(worker["name"])
     if target:
         if send_tmux(target, text):
             log(f"tmux {target} ← {text}")
-            notify("Claudio ▶️", t("sent_tmux", text=text))
+            notify(f"{title} ▶️", t("sent_tmux", text=text))
             state["rec"].Reset()
             return
         log(f"tmux send failed ({target}); falling back to headless.")
-    # 2) headless claude
-    notify("Claudio 🎤", t("order", text=text))
+    # 2) headless claude in the worker's own project
+    notify(f"{title} 🎤", t("order", text=text))
     # pause capture while claude works, so stale audio doesn't pile up
     state["arecord"].terminate()
-    reply = run_claude(text)
+    reply = run_claude(text, worker["dir"])
     log(t("reply", text=reply[:500]))
-    notify("Claudio ✅", reply[:300])
+    notify(f"{title} ✅", reply[:300])
     state["arecord"] = start_arecord()
     state["rec"].Reset()
 
@@ -294,9 +341,11 @@ def main():
     log(t("loading", model=MODEL_DIR))
     model = Model(str(MODEL_DIR))
     rec = KaldiRecognizer(model, RATE)
-    state = {"arecord": start_arecord(), "rec": rec}
-    log(t("listening_log", wake=WAKE, dir=WORKDIR))
-    notify("Claudio 🎤", t("listening_notify", wake=WAKE))
+    team = load_team()
+    state = {"arecord": start_arecord(), "rec": rec, "team": team, "team_mtime": None}
+    names = ", ".join(w["name"] for w in team)
+    log(t("listening_log", wake=names, dir=WORKDIR))
+    notify("Claudio 🎤", t("listening_notify", wake=names))
 
     def stop(signum, frame):
         log(t("shutdown"))
@@ -306,11 +355,22 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
-    mode = "wake"      # "wake": waiting for the wake word; "cmd": waiting for the command
+    mode = "wake"      # "wake": waiting for a name; "cmd": waiting for the command
+    pending = None     # worker that was called and is waiting for its command
     deadline = 0.0
     beeped = False     # already gave feedback for this utterance
 
     while True:
+        # hot reload: `claudio hire/fire` edits the team file while we run
+        try:
+            mtime = TEAM_FILE.stat().st_mtime
+        except OSError:
+            mtime = None
+        if mtime != state["team_mtime"]:
+            state["team_mtime"] = mtime
+            state["team"] = load_team()
+            log("team: " + ", ".join(w["name"] for w in state["team"]))
+
         data = state["arecord"].stdout.read(CHUNK)
         if not data:
             log(t("arecord_lost"))
@@ -332,25 +392,28 @@ def main():
         if rec.AcceptWaveform(data):
             text = json.loads(rec.Result()).get("text", "").strip()
             if mode == "wake":
-                cmd = command_after_wake(text) if text else None
-                if cmd is not None:
+                worker, cmd = match_worker(text, state["team"]) if text else (None, None)
+                if worker is not None:
                     if cmd.strip():
-                        dispatch(cmd, state)
+                        dispatch(worker, cmd, state)
                     else:
                         beep()
-                        notify("Claudio 🎤", t("prompt"))
+                        notify(f"{worker['name'].capitalize()} 🎤", t("prompt"))
                         mode = "cmd"
+                        pending = worker
                         deadline = time.time() + COMMAND_TIMEOUT
             else:
                 if text:
-                    dispatch(text, state)
+                    dispatch(pending, text, state)
                     mode = "wake"
             beeped = False
         else:
             partial = json.loads(rec.PartialResult()).get("partial", "")
-            if mode == "wake" and not beeped and normalize(WAKE) in normalize(partial):
-                beep()  # instant feedback on wake word detection
-                beeped = True
+            if mode == "wake" and not beeped:
+                norm_partial = normalize(partial)
+                if any(normalize(w["name"]) in norm_partial for w in state["team"]):
+                    beep()  # instant feedback on name detection
+                    beeped = True
 
         if mode == "cmd" and time.time() > deadline:
             mode = "wake"

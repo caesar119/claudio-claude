@@ -48,6 +48,9 @@ Then just say:
 
 > **"Claudio, run the tests"**
 
+Want one assistant per project, each with their own name and voice? See
+[A team of workers](#a-team-of-workers-).
+
 - A short *beep* confirms the wake word was heard.
 - Say the wake word alone and it beeps and waits up to 10 s for your command.
 - `claudio log` follows what it hears; `claudio stop` shuts it down.
@@ -99,10 +102,37 @@ Details worth knowing:
 - A new reply interrupts the previous one — the latest answer wins.
 - Speech is synthesized locally; nothing is sent anywhere.
 
-### Multiple projects
+## A team of workers 👥
 
-`claudio code ~/some/project` opens each project in its own tmux session
-(`claudio-<name>`). With several open at once, voice commands go to the pane
+Hire a **named worker for each project** — like employees you call by name:
+
+```bash
+claudio hire marcela ~/projects/backend ef_dora   # name, project, voice
+claudio hire bruno ~/projects/webapp em_santa
+claudio team          # who works where (and who's present in tmux)
+claudio fire bruno    # remove a worker
+```
+
+Then just talk to them:
+
+> **"Marcela, run the tests"** — typed into Marcela's terminal (open it with
+> `claudio code marcela`), or run headless **in her project** if it's closed.
+> **"Claudio, commit everything"** — goes to Claudio's project. Same mic,
+> different workers, at the same time.
+
+- Each worker owns a project directory and a tmux session (`claudio-<name>`).
+- Each worker **answers with their own voice** (pick any Kokoro voice).
+- The daemon reloads the team on the fly — no restart after hire/fire.
+- Your first `hire` automatically keeps the original wake word as a worker,
+  so nothing breaks.
+- The team lives in `~/.local/share/claudio/team` (one `name  dir  voice`
+  line per worker). Pick names the speech model recognizes well — common
+  first names of your language work best.
+
+### Without a team (single wake word)
+
+If you never hire anyone, v1 behavior applies: `claudio code ~/some/project`
+opens each project in its own tmux session and voice commands go to the pane
 **you are looking at** (attached session, active pane); if none is visible,
 to the first `claudio-*` session found.
 

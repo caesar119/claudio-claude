@@ -140,6 +140,22 @@ def last_reply(transcript_path):
     return text
 
 
+def team_voice(cwd):
+    """Voice of the worker whose project contains cwd (longest match), or ""."""
+    try:
+        real = os.path.realpath(cwd or "")
+        best, voice = "", ""
+        for line in (DATA_DIR / "team").read_text().splitlines():
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 3 and parts[1].strip() and parts[2].strip():
+                d = os.path.realpath(parts[1].strip())
+                if (real == d or real.startswith(d + os.sep)) and len(d) > len(best):
+                    best, voice = d, parts[2].strip()
+        return voice
+    except OSError:
+        return ""
+
+
 def kokoro_available():
     return (
         KOKORO_ONNX.exists()
@@ -164,14 +180,18 @@ def engine():
     return ""
 
 
-def speak_detached(text):
+def speak_detached(text, voice=""):
     """Re-launch as an independent session so the caller (hook/CLI) returns
     right away and, being a process-group leader, can be silenced safely."""
+    env = os.environ.copy()
+    if voice:
+        env["CLAUDIO_KOKORO_VOICE"] = voice
     subprocess.Popen(
         [sys.executable, os.path.abspath(__file__), "--speak", text],
         start_new_session=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
     )
 
 
@@ -359,7 +379,7 @@ def main():
             sys.exit(0)
         text = clean(last_reply(payload.get("transcript_path", "")) or "")
         if text:
-            speak_detached(text)
+            speak_detached(text, voice=team_voice(payload.get("cwd", "")))
         sys.exit(0)
 
     if mode == "--say":
